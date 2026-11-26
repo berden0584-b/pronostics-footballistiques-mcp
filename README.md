@@ -74,3 +74,4 @@ Projet en cours de développement. Les fonctionnalités annoncées comme prévue
 ## Avertissement
 
 Les probabilités et pronostics sont des estimations statistiques, jamais des garanties de résultat. Les paris sportifs comportent un risque de perte financière.
+Projet en développement
