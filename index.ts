@@ -1,8 +1,8 @@
 
 import "dotenv/config";
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -17,6 +17,45 @@ const sessions = new Map<string, {
   transport: StreamableHTTPServerTransport;
 }>();
 
+// Protection de l'accès MCP par jeton secret.
+function requireMcpToken(
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  const expectedToken = process.env.MCP_ACCESS_TOKEN;
+
+  if (!expectedToken) {
+    res.status(503).json({
+      error: "Le serveur MCP n'est pas encore sécurisé."
+    });
+    return;
+  }
+
+  const authorization = req.get("authorization") || "";
+  const suppliedToken = authorization.startsWith("Bearer ")
+    ? authorization.slice(7)
+    : "";
+
+  const expected = Buffer.from(expectedToken);
+  const supplied = Buffer.from(suppliedToken);
+
+  if (
+    supplied.length !== expected.length ||
+    !timingSafeEqual(supplied, expected)
+  ) {
+    res.status(401).json({
+      error: "Accès non autorisé."
+    });
+    return;
+  }
+
+  next();
+}
+
+// Toutes les routes MCP nécessitent un jeton valide.
+app.use("/mcp", requireMcpToken);
+
 function createMcpServer() {
   const server = new McpServer({
     name: "pronostics-footballistiques-mcp",
@@ -29,8 +68,14 @@ function createMcpServer() {
     {},
     async () => {
       const providers = [
-        { name: "API-Football", configured: Boolean(process.env.API_FOOTBALL_KEY) },
-        { name: "football-data.org", configured: Boolean(process.env.FOOTBALL_DATA_TOKEN) }
+        {
+          name: "API-Football",
+          configured: Boolean(process.env.API_FOOTBALL_KEY)
+        },
+        {
+          name: "football-data.org",
+          configured: Boolean(process.env.FOOTBALL_DATA_TOKEN)
+        }
       ];
 
       return {
@@ -73,7 +118,7 @@ app.post("/mcp", async (req, res) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
   try {
-    let session = sessionId ? sessions.get(sessionId) : undefined;
+    const session = sessionId ? sessions.get(sessionId) : undefined;
 
     if (!session && !sessionId && isInitializeRequest(req.body)) {
       const server = createMcpServer();
@@ -104,15 +149,23 @@ app.post("/mcp", async (req, res) => {
 
     await session.transport.handleRequest(req, res, req.body);
   } catch (error) {
-    console.error("Erreur MCP :", error instanceof Error ? error.message : "Erreur inconnue");
+    console.error(
+      "Erreur MCP :",
+      error instanceof Error ? error.message : "Erreur inconnue"
+    );
+
     if (!res.headersSent) {
-      res.status(500).json({ error: "Erreur interne du serveur MCP." });
+      res.status(500).json({
+        error: "Erreur interne du serveur MCP."
+      });
     }
   }
 });
 
 app.get("/mcp", (_req, res) => {
-  res.status(405).json({ error: "Utilisez le transport MCP Streamable HTTP." });
+  res.status(405).json({
+    error: "Utilisez le transport MCP Streamable HTTP."
+  });
 });
 
 app.delete("/mcp", async (req, res) => {
@@ -120,7 +173,9 @@ app.delete("/mcp", async (req, res) => {
   const session = sessionId ? sessions.get(sessionId) : undefined;
 
   if (!session) {
-    res.status(404).json({ error: "Session introuvable." });
+    res.status(404).json({
+      error: "Session introuvable."
+    });
     return;
   }
 
